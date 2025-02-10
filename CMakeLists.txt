@@ -57,6 +57,7 @@ target_include_directories(tarefa_6_2 PRIVATE
 target_link_libraries(tarefa_6_2 
         hardware_adc
         hardware_i2c
+        hardware_pwm
         )
 
 pico_add_extra_outputs(tarefa_6_2)
