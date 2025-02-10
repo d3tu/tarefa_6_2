@@ -11,7 +11,7 @@
 
 #define DISPLAY_I2C_SDA 14
 #define DISPLAY_I2C_SCL 15
-#define DISPLAY_MAX_CHARS_PER_LINE 21
+#define DISPLAY_MAX_CHARS_PER_LINE 17
 #define DISPLAY_LINE_HEIGHT 8
 
 uint8_t ssd[ssd1306_buffer_length];
@@ -28,15 +28,19 @@ void display_clr();
 void display_str(char *string, int16_t x, int16_t y);
 void display_put();
 
+void joystick();
+void buzzer();
+void led();
+
 int map_value(int value, int in_min, int in_max, int out_min, int out_max) {
-  return (value - in_min) * (out_max - out_min); // (in_max - in_min) + out_min
+  return out_min + (value - in_min) * (out_max - out_min) / (in_max - in_min);
 }
 
-volatile bool button_pressed = false;
+volatile int button_pressed = 0;
 
 void joystick_button_irq_handler(uint gpio, uint32_t events) {
   if (gpio == 22 && (events & GPIO_IRQ_EDGE_FALL)) { // Detecta borda de descida (botão pressionado)
-      button_pressed = true;
+      button_pressed = 1;
   }
 }
 
@@ -61,14 +65,14 @@ int main() {
   gpio_pull_up(22);
 
   while (1) {
-    adc_select_input(1);
+    adc_select_input(0);
 
     sleep_us(2);
-    int joystickY = map_value(adc_read() - 400, 65278, 240, 0, 2);
+    int joystickY = adc_read();
 
-    if (joystickY == 0) {
+    if (joystickY > 3000) {
       --option;
-    } else if (joystickY == 2) {
+    } else if (joystickY < 1000) {
       ++option;
     }
 
@@ -84,29 +88,65 @@ int main() {
 
     switch (option) {
       case 0:
-        display_str("O JOYSTICK", 0, 0 * DISPLAY_LINE_HEIGHT);
+        display_str("X JOYSTICK", 0, 0 * DISPLAY_LINE_HEIGHT);
         display_str("  BUZZER", 0, 1 * DISPLAY_LINE_HEIGHT);
         display_str("  LED", 0, 2 * DISPLAY_LINE_HEIGHT);
         break;
       case 1:
         display_str("  JOYSTICK", 0, 0 * DISPLAY_LINE_HEIGHT);
-        display_str("O BUZZER", 0, 1 * DISPLAY_LINE_HEIGHT);
+        display_str("X BUZZER", 0, 1 * DISPLAY_LINE_HEIGHT);
         display_str("  LED", 0, 2 * DISPLAY_LINE_HEIGHT);
         break;
       case 2:
         display_str("  JOYSTICK", 0, 0 * DISPLAY_LINE_HEIGHT);
         display_str("  BUZZER", 0, 1 * DISPLAY_LINE_HEIGHT);
-        display_str("O LED", 0, 2 * DISPLAY_LINE_HEIGHT);
+        display_str("X LED", 0, 2 * DISPLAY_LINE_HEIGHT);
         break;
     }
 
-    if (button_pressed) {
-      
-    }
+    display_str("PRESSIONE O BOTAO DO JOYSTICK PARA SELECIONAR", 0, 4 * DISPLAY_LINE_HEIGHT);
 
+    
     display_put();
 
-    sleep_ms(100);
+    if (button_pressed) {
+      button_pressed = 0;
+      
+      display_clr();
+
+      switch (option) {
+        case 0: display_str("MODO JOYSTICK", 0, 0); break;
+        case 1: display_str("MODO BUZZER", 0, 0); break;
+        case 2: display_str("MODO LED", 0, 0); break;
+      }
+
+      display_str("PRESSIONE O BOTAO DO JOYSTICK PARA VOLTAR", 0, 2 * DISPLAY_LINE_HEIGHT);
+
+      display_put();
+
+      switch (option) {
+        case 0:
+          joystick();
+          break;
+        case 1:
+          buzzer();
+          break;
+        case 2:
+          led();
+          break;
+      }
+
+      // display_clr();
+
+      // display_str("AGUARDE", 0, 0 * DISPLAY_LINE_HEIGHT);
+
+      // display_put();
+
+      // sleep_ms(1000);
+    }
+    // else {
+      sleep_ms(100);
+    // }
   }
 
   return 0;
@@ -240,7 +280,7 @@ void joystick()
   // Loop principal
   while (1)
   {
-    if (button_pressed) break;
+    if (button_pressed) {button_pressed=0;break;}
     joystick_read_axis(&vrx_value, &vry_value); // Lê os valores dos eixos do joystick
     // Ajusta os níveis PWM dos LEDs de acordo com os valores do joystick
     pwm_set_gpio_level(LED_B, vrx_value); // Ajusta o brilho do LED azul com o valor do eixo X
@@ -249,6 +289,8 @@ void joystick()
     // Pequeno delay antes da próxima leitura
     sleep_ms(100); // Espera 100 ms antes de repetir o ciclo
   }
+  pwm_set_gpio_level(LED_B, 0);
+    pwm_set_gpio_level(LED_R, 0);
 }
 
 #include <stdio.h>
@@ -256,8 +298,6 @@ void joystick()
 #include "hardware/pwm.h"
 
 const uint LED = 12;            // Pino do LED conectado
-const uint16_t PERIOD = 2000;   // Período do PWM (valor máximo do contador)
-const float DIVIDER_PWM = 16.0; // Divisor fracional do clock para o PWM
 const uint16_t LED_STEP = 100;  // Passo de incremento/decremento para o duty cycle do LED
 uint16_t led_level = 100;       // Nível inicial do PWM (duty cycle)
 
@@ -278,7 +318,7 @@ void led()
     setup_pwm();      // Configura o PWM
     while (1)
     {
-      if (button_pressed) break;
+      if (button_pressed) {button_pressed=0;break;}
         pwm_set_gpio_level(LED, led_level); // Define o nível atual do PWM (duty cycle)
         sleep_ms(1000);                     // Atraso de 1 segundo
         if (up_down)
@@ -294,6 +334,7 @@ void led()
                 up_down = 1; // Muda direção para aumentar quando atingir o mínimo
         }
     }
+    pwm_set_gpio_level(LED, 0);
 }
 
 /**
@@ -373,16 +414,16 @@ void led()
          } else {
              play_tone(pin, star_wars_notes[i], note_duration[i]);
          }
+         if (button_pressed) {break;}
      }
  }
 
  void buzzer() {
-  pwm_init_buzzer(BUZZER_PIN);
+  
   while(1){
-    if (button_pressed) break;
+    pwm_init_buzzer(BUZZER_PIN);
+    if (button_pressed) {button_pressed=0;break;}
     play_star_wars(BUZZER_PIN);
    
   }
- 
-  return 0;
 }
